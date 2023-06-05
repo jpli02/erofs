@@ -1,5 +1,6 @@
 # EROFS - Enhanced Read-Only File System
-## This is a personal repo. More info: [EROFS](https://docs.kernel.org/filesystems/erofs.html)
+
+This is a personal repo. More info: [EROFS](https://docs.kernel.org/filesystems/erofs.html)
 
 EROFS is a high-performance file system for read-only situations. Currently, the erofs-utils user mode tool packs and builds images (mkfs.erofs) in a single-threaded way, and the unpacking of fsck.erofs is also single-threaded. There is room for improvement in end-to-end time for multi-threaded compression/decompression optimization. 
 
