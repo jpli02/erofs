@@ -13,6 +13,9 @@
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
 
 struct erofs_configure cfg;
 struct erofs_sb_info sbi;
@@ -25,6 +28,7 @@ void erofs_init_configure(void)
 	cfg.c_version  = PACKAGE_VERSION;
 	cfg.c_dry_run  = false;
 	cfg.c_ignore_mtime = false;
+	cfg.c_compr_level_master = -1;
 	cfg.c_force_inodeversion = 0;
 	cfg.c_inline_xattr_tolerance = 2;
 	cfg.c_unix_timestamp = -1;
@@ -157,4 +161,13 @@ void erofs_update_progressinfo(const char *fmt, ...)
 	printf("\r\033[K%s", msg);
 	__erofs_is_progressmsg = true;
 	fflush(stdout);
+}
+
+unsigned int erofs_get_available_processors(void)
+{
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYSCONF)
+	return sysconf(_SC_NPROCESSORS_ONLN);
+#else
+	return 0;
+#endif
 }

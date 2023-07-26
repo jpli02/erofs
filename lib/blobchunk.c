@@ -10,8 +10,10 @@
 #include "erofs/block_list.h"
 #include "erofs/cache.h"
 #include "erofs/io.h"
-#include "sha256.h"
 #include <unistd.h>
+
+void erofs_sha256(const unsigned char *in, unsigned long in_size,
+		  unsigned char out[32]);
 
 struct erofs_blobchunk {
 	struct hashmap_entry ent;

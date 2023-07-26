@@ -17,7 +17,6 @@
 #endif
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/mman.h>
 #include "erofs/err.h"
 #include "erofs/inode.h"
 #include "erofs/compress.h"
@@ -27,7 +26,7 @@
 
 struct erofs_fragment_dedupe_item {
 	struct list_head	list;
-	unsigned int		length;
+	unsigned int		length, nr_dup;
 	erofs_off_t		pos;
 	u8			data[];
 };
@@ -54,8 +53,7 @@ static int z_erofs_fragments_dedupe_find(struct erofs_inode *inode, int fd,
 	struct erofs_fragment_dedupe_item *cur, *di = NULL;
 	struct list_head *head;
 	u8 *data;
-	unsigned int length, e2, deduped;
-	erofs_off_t pos;
+	unsigned int length, e2;
 	int ret;
 
 	head = &dupli_frags[FRAGMENT_HASH(crc)];
@@ -85,7 +83,6 @@ static int z_erofs_fragments_dedupe_find(struct erofs_inode *inode, int fd,
 
 	DBG_BUGON(length <= EROFS_TOF_HASHLEN);
 	e2 = length - EROFS_TOF_HASHLEN;
-	deduped = 0;
 
 	list_for_each_entry(cur, head, list) {
 		unsigned int e1, mn, i = 0;
@@ -100,44 +97,22 @@ static int z_erofs_fragments_dedupe_find(struct erofs_inode *inode, int fd,
 		while (i < mn && cur->data[e1 - i - 1] == data[e2 - i - 1])
 			++i;
 
-		if (!di || i + EROFS_TOF_HASHLEN > deduped) {
-			deduped = i + EROFS_TOF_HASHLEN;
+		if (i && (!di || i + EROFS_TOF_HASHLEN > di->nr_dup)) {
+			cur->nr_dup = i + EROFS_TOF_HASHLEN;
 			di = cur;
 
 			/* full match */
-			if (i == e2)
+			if (i == mn)
 				break;
 		}
 	}
 	if (!di)
 		goto out;
 
-	DBG_BUGON(di->length < deduped);
-	pos = di->pos + di->length - deduped;
-	/* let's read more to dedupe as long as we can */
-	if (deduped == di->length) {
-		fflush(packedfile);
+	DBG_BUGON(di->length < di->nr_dup);
 
-		while(deduped < inode->i_size && pos) {
-			char buf[2][16384];
-			unsigned int sz = min_t(unsigned int, pos,
-						sizeof(buf[0]));
-
-			if (pread(fileno(packedfile), buf[0], sz,
-				  pos - sz) != sz)
-				break;
-			if (pread(fd, buf[1], sz,
-				  inode->i_size - deduped - sz) != sz)
-				break;
-
-			if (memcmp(buf[0], buf[1], sz))
-				break;
-			pos -= sz;
-			deduped += sz;
-		}
-	}
-	inode->fragment_size = deduped;
-	inode->fragmentoff = pos;
+	inode->fragment_size = di->nr_dup;
+	inode->fragmentoff = di->pos + di->length - di->nr_dup;
 
 	erofs_dbg("Dedupe %u tail data at %llu", inode->fragment_size,
 		  inode->fragmentoff | 0ULL);
@@ -178,11 +153,7 @@ static int z_erofs_fragments_dedupe_insert(void *data, unsigned int len,
 
 	if (len <= EROFS_TOF_HASHLEN)
 		return 0;
-	if (len > EROFS_CONFIG_COMPR_MAX_SZ) {
-		data += len - EROFS_CONFIG_COMPR_MAX_SZ;
-		pos += len - EROFS_CONFIG_COMPR_MAX_SZ;
-		len = EROFS_CONFIG_COMPR_MAX_SZ;
-	}
+
 	di = malloc(sizeof(*di) + len);
 	if (!di)
 		return -ENOMEM;
@@ -190,6 +161,7 @@ static int z_erofs_fragments_dedupe_insert(void *data, unsigned int len,
 	memcpy(di->data, data, len);
 	di->length = len;
 	di->pos = pos;
+	di->nr_dup = 0;
 
 	list_add_tail(&di->list, &dupli_frags[FRAGMENT_HASH(crc)]);
 	return 0;
@@ -230,69 +202,6 @@ void z_erofs_fragments_commit(struct erofs_inode *inode)
 
 	inode->z_advise |= Z_EROFS_ADVISE_FRAGMENT_PCLUSTER;
 	erofs_sb_set_fragments();
-}
-
-int z_erofs_pack_file_from_fd(struct erofs_inode *inode, int fd,
-			      u32 tofcrc)
-{
-#ifdef HAVE_FTELLO64
-	off64_t offset = ftello64(packedfile);
-#else
-	off_t offset = ftello(packedfile);
-#endif
-	char *memblock;
-	int rc;
-
-	if (offset < 0)
-		return -errno;
-
-	inode->fragmentoff = (erofs_off_t)offset;
-	inode->fragment_size = inode->i_size;
-
-	memblock = mmap(NULL, inode->i_size, PROT_READ, MAP_SHARED, fd, 0);
-	if (memblock == MAP_FAILED || !memblock) {
-		unsigned long long remaining = inode->fragment_size;
-
-		memblock = NULL;
-		while (remaining) {
-			char buf[32768];
-			unsigned int sz = min_t(unsigned int, remaining,
-						sizeof(buf));
-
-			rc = read(fd, buf, sz);
-			if (rc != sz) {
-				if (rc < 0)
-					rc = -errno;
-				else
-					rc = -EAGAIN;
-				goto out;
-			}
-			if (fwrite(buf, sz, 1, packedfile) != 1) {
-				rc = -EIO;
-				goto out;
-			}
-			remaining -= sz;
-		}
-		rc = lseek(fd, 0, SEEK_SET);
-		if (rc < 0) {
-			rc = -errno;
-			goto out;
-		}
-	} else if (fwrite(memblock, inode->fragment_size, 1, packedfile) != 1) {
-		rc = -EIO;
-		goto out;
-	}
-
-	erofs_dbg("Recording %u fragment data at %lu", inode->fragment_size,
-		  inode->fragmentoff);
-
-	if (memblock)
-		rc = z_erofs_fragments_dedupe_insert(memblock,
-			inode->fragment_size, inode->fragmentoff, tofcrc);
-out:
-	if (memblock)
-		munmap(memblock, inode->i_size);
-	return rc;
 }
 
 int z_erofs_pack_fragments(struct erofs_inode *inode, void *data,

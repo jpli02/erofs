@@ -119,8 +119,6 @@ unsigned int erofs_iput(struct erofs_inode *inode)
 	if (inode->eof_tailraw)
 		free(inode->eof_tailraw);
 	list_del(&inode->i_hash);
-	if (inode->i_srcpath)
-		free(inode->i_srcpath);
 	free(inode);
 	return 0;
 }
@@ -426,7 +424,7 @@ static int erofs_write_file(struct erofs_inode *inode)
 		return erofs_blob_write_chunked_file(inode);
 	}
 
-	if (cfg.c_compr_alg[0] && erofs_file_is_compressible(inode)) {
+	if (cfg.c_compr_alg_master && erofs_file_is_compressible(inode)) {
 		fd = open(inode->i_srcpath, O_RDONLY | O_BINARY);
 		if (fd < 0)
 			return -errno;
@@ -907,9 +905,8 @@ static int erofs_fill_inode(struct erofs_inode *inode, struct stat *st,
 		return -EINVAL;
 	}
 
-	inode->i_srcpath = strdup(path);
-	if (!inode->i_srcpath)
-		return -ENOMEM;
+	strncpy(inode->i_srcpath, path, sizeof(inode->i_srcpath) - 1);
+	inode->i_srcpath[sizeof(inode->i_srcpath) - 1] = '\0';
 
 	inode->dev = st->st_dev;
 	inode->i_ino[1] = st->st_ino;
@@ -980,9 +977,10 @@ static struct erofs_inode *erofs_iget_from_path(const char *path, bool is_src)
 
 	ret = erofs_fill_inode(inode, &st, path);
 	if (ret) {
-		erofs_iput(inode);
+		free(inode);
 		return ERR_PTR(ret);
 	}
+
 	return inode;
 }
 

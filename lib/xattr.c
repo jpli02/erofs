@@ -315,7 +315,7 @@ static int read_xattrs_from_file(const char *path, mode_t mode,
 	unsigned int keylen;
 	struct xattr_item *item;
 
-	if (kllen < 0 && errno != ENODATA && errno != EOPNOTSUPP) {
+	if (kllen < 0 && errno != ENODATA) {
 		erofs_err("llistxattr to get the size of names for %s failed",
 			  path);
 		return -errno;
@@ -915,7 +915,7 @@ static int xattr_foreach(struct xattr_iter *it,
 			it->ofs = 0;
 		}
 
-		slice = min_t(unsigned int, EROFS_BLKSIZ - it->ofs,
+		slice = min_t(unsigned int, PAGE_SIZE - it->ofs,
 			      entry.e_name_len - processed);
 
 		/* handle name */
@@ -950,7 +950,7 @@ static int xattr_foreach(struct xattr_iter *it,
 			it->ofs = 0;
 		}
 
-		slice = min_t(unsigned int, EROFS_BLKSIZ - it->ofs,
+		slice = min_t(unsigned int, PAGE_SIZE - it->ofs,
 			      value_sz - processed);
 		op->value(it, processed, it->kaddr + it->ofs, slice);
 		it->ofs += slice;
