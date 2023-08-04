@@ -32,6 +32,8 @@ enum {
 	TIMESTAMP_CLAMPING,
 };
 
+#define EROFS_MAX_COMPR_CFGS		64
+
 struct erofs_configure {
 	const char *c_version;
 	int c_dbg_lvl;
@@ -39,15 +41,18 @@ struct erofs_configure {
 	bool c_legacy_compress;
 #ifndef NDEBUG
 	bool c_random_pclusterblks;
+	bool c_random_algorithms;
 #endif
 	char c_timeinherit;
 	char c_chunkbits;
 	bool c_noinline_data;
 	bool c_ztailpacking;
 	bool c_fragments;
+	bool c_all_fragments;
 	bool c_dedupe;
 	bool c_ignore_mtime;
 	bool c_showprogress;
+	bool c_extra_ea_name_prefixes;
 
 #ifdef HAVE_LIBSELINUX
 	struct selabel_handle *sehnd;
@@ -57,8 +62,8 @@ struct erofs_configure {
 	char *c_src_path;
 	char *c_blobdev_path;
 	char *c_compress_hints_file;
-	char *c_compr_alg_master;
-	int c_compr_level_master;
+	char *c_compr_alg[EROFS_MAX_COMPR_CFGS];
+	int c_compr_level[EROFS_MAX_COMPR_CFGS];
 	char c_force_inodeversion;
 	char c_force_chunkformat;
 	/* < 0, xattr disabled and INT_MAX, always use inline xattrs */
@@ -101,7 +106,6 @@ static inline int erofs_selabel_open(const char *file_contexts)
 
 void erofs_update_progressinfo(const char *fmt, ...);
 char *erofs_trim_for_progressinfo(const char *str, int placeholder);
-unsigned int erofs_get_available_processors(void);
 
 #ifdef __cplusplus
 }

@@ -27,6 +27,7 @@ struct erofs_compressor {
 };
 
 struct erofs_compress {
+	struct erofs_sb_info *sbi;
 	const struct erofs_compressor *alg;
 
 	unsigned int compress_threshold;
@@ -44,13 +45,16 @@ struct erofs_compress {
 extern const struct erofs_compressor erofs_compressor_lz4;
 extern const struct erofs_compressor erofs_compressor_lz4hc;
 extern const struct erofs_compressor erofs_compressor_lzma;
+extern const struct erofs_compressor erofs_compressor_deflate;
+extern const struct erofs_compressor erofs_compressor_libdeflate;
 
 int erofs_compress_destsize(const struct erofs_compress *c,
 			    const void *src, unsigned int *srcsize,
 			    void *dst, unsigned int dstsize, bool inblocks);
 
 int erofs_compressor_setlevel(struct erofs_compress *c, int compression_level);
-int erofs_compressor_init(struct erofs_compress *c, char *alg_name);
+int erofs_compressor_init(struct erofs_sb_info *sbi,
+		struct erofs_compress *c, char *alg_name);
 int erofs_compressor_exit(struct erofs_compress *c);
 
 #endif

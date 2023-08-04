@@ -17,10 +17,8 @@
 #include "erofs/compress.h"
 #include "erofs/fragments.h"
 #include "../lib/liberofs_private.h"
+#include "../lib/liberofs_uuid.h"
 
-#ifdef HAVE_LIBUUID
-#include <uuid.h>
-#endif
 
 struct erofsdump_cfg {
 	unsigned int totalshow;
@@ -93,12 +91,13 @@ struct erofsdump_feature {
 static struct erofsdump_feature feature_lists[] = {
 	{ true, EROFS_FEATURE_COMPAT_SB_CHKSUM, "sb_csum" },
 	{ true, EROFS_FEATURE_COMPAT_MTIME, "mtime" },
-	{ false, EROFS_FEATURE_INCOMPAT_LZ4_0PADDING, "0padding" },
+	{ false, EROFS_FEATURE_INCOMPAT_ZERO_PADDING, "0padding" },
 	{ false, EROFS_FEATURE_INCOMPAT_BIG_PCLUSTER, "big_pcluster" },
 	{ false, EROFS_FEATURE_INCOMPAT_CHUNKED_FILE, "chunked_file" },
 	{ false, EROFS_FEATURE_INCOMPAT_DEVICE_TABLE, "device_table" },
 	{ false, EROFS_FEATURE_INCOMPAT_ZTAILPACKING, "ztailpacking" },
 	{ false, EROFS_FEATURE_INCOMPAT_FRAGMENTS, "fragments" },
+	{ false, EROFS_FEATURE_INCOMPAT_DEDUPE, "dedupe" },
 };
 
 static int erofsdump_readdir(struct erofs_dir_context *ctx);
@@ -155,7 +154,7 @@ static int erofsdump_parse_options_cfg(int argc, char **argv)
 			usage();
 			exit(0);
 		case 3:
-			err = blob_open_ro(optarg);
+			err = blob_open_ro(&sbi, optarg);
 			if (err)
 				return err;
 			++sbi.extra_devices;
@@ -200,10 +199,10 @@ static int erofsdump_get_occupied_size(struct erofs_inode *inode,
 		stats.uncompressed_files++;
 		*size = inode->i_size;
 		break;
-	case EROFS_INODE_FLAT_COMPRESSION_LEGACY:
-	case EROFS_INODE_FLAT_COMPRESSION:
+	case EROFS_INODE_COMPRESSED_FULL:
+	case EROFS_INODE_COMPRESSED_COMPACT:
 		stats.compressed_files++;
-		*size = inode->u.i_blocks * EROFS_BLKSIZ;
+		*size = inode->u.i_blocks * erofs_blksiz(inode->sbi);
 		break;
 	default:
 		erofs_err("unknown datalayout");
@@ -271,9 +270,9 @@ static int erofsdump_read_packed_inode(void)
 {
 	int err;
 	erofs_off_t occupied_size = 0;
-	struct erofs_inode vi = { .nid = sbi.packed_nid };
+	struct erofs_inode vi = { .sbi = &sbi, .nid = sbi.packed_nid };
 
-	if (!erofs_sb_has_fragments())
+	if (!(erofs_sb_has_fragments(&sbi) && sbi.packed_nid > 0))
 		return 0;
 
 	err = erofs_read_inode_from_disk(&vi);
@@ -297,7 +296,7 @@ static int erofsdump_readdir(struct erofs_dir_context *ctx)
 {
 	int err;
 	erofs_off_t occupied_size = 0;
-	struct erofs_inode vi = { .nid = ctx->de_nid };
+	struct erofs_inode vi = { .sbi = &sbi, .nid = ctx->de_nid };
 
 	err = erofs_read_inode_from_disk(&vi);
 	if (err) {
@@ -352,7 +351,7 @@ static void erofsdump_show_fileinfo(bool show_extent)
 	int err, i;
 	erofs_off_t size;
 	u16 access_mode;
-	struct erofs_inode inode = { .nid = dumpcfg.nid };
+	struct erofs_inode inode = { .sbi = &sbi, .nid = dumpcfg.nid };
 	char path[PATH_MAX];
 	char access_mode_str[] = "rwxrwxrwx";
 	char timebuf[128] = {0};
@@ -383,7 +382,7 @@ static void erofsdump_show_fileinfo(bool show_extent)
 		return;
 	}
 
-	err = erofs_get_pathname(inode.nid, path, sizeof(path));
+	err = erofs_get_pathname(inode.sbi, inode.nid, path, sizeof(path));
 	if (err < 0) {
 		strncpy(path, "(not found)", sizeof(path) - 1);
 		path[sizeof(path) - 1] = '\0';
@@ -448,7 +447,7 @@ static void erofsdump_show_fileinfo(bool show_extent)
 			.m_deviceid = map.m_deviceid,
 			.m_pa = map.m_pa,
 		};
-		err = erofs_map_dev(&sbi, &mdev);
+		err = erofs_map_dev(inode.sbi, &mdev);
 		if (err) {
 			erofs_err("failed to map device");
 			return;
@@ -592,7 +591,7 @@ static void erofsdump_print_statistic(void)
 static void erofsdump_show_superblock(void)
 {
 	time_t time = sbi.build_time;
-	char uuid_str[37] = "not available";
+	char uuid_str[37];
 	int i = 0;
 
 	fprintf(stdout, "Filesystem magic number:                      0x%04X\n",
@@ -605,7 +604,7 @@ static void erofsdump_show_superblock(void)
 			sbi.xattr_blkaddr);
 	fprintf(stdout, "Filesystem root nid:                          %llu\n",
 			sbi.root_nid | 0ULL);
-	if (erofs_sb_has_fragments())
+	if (erofs_sb_has_fragments(&sbi) && sbi.packed_nid > 0)
 		fprintf(stdout, "Filesystem packed nid:                        %llu\n",
 			sbi.packed_nid | 0ULL);
 	fprintf(stdout, "Filesystem inode count:                       %llu\n",
@@ -620,9 +619,7 @@ static void erofsdump_show_superblock(void)
 		if (feat & feature_lists[i].flag)
 			fprintf(stdout, "%s ", feature_lists[i].name);
 	}
-#ifdef HAVE_LIBUUID
-	uuid_unparse_lower(sbi.uuid, uuid_str);
-#endif
+	erofs_uuid_unparse_lower(sbi.uuid, uuid_str);
 	fprintf(stdout, "\nFilesystem UUID:                              %s\n",
 			uuid_str);
 }
@@ -639,13 +636,13 @@ int main(int argc, char **argv)
 		goto exit;
 	}
 
-	err = dev_open_ro(cfg.c_img_path);
+	err = dev_open_ro(&sbi, cfg.c_img_path);
 	if (err) {
 		erofs_err("failed to open image file");
 		goto exit;
 	}
 
-	err = erofs_read_superblock();
+	err = erofs_read_superblock(&sbi);
 	if (err) {
 		erofs_err("failed to read superblock");
 		goto exit_dev_close;
@@ -670,11 +667,11 @@ int main(int argc, char **argv)
 		erofsdump_show_fileinfo(dumpcfg.show_extent);
 
 exit_put_super:
-	erofs_put_super();
+	erofs_put_super(&sbi);
 exit_dev_close:
-	dev_close();
+	dev_close(&sbi);
 exit:
-	blob_closeall();
+	blob_closeall(&sbi);
 	erofs_exit_configure();
 	return err;
 }

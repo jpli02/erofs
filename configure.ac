@@ -102,15 +102,6 @@ AC_ARG_ENABLE([debug],
     [enable_debug="$enableval"],
     [enable_debug="no"])
 
-# mt
-AC_MSG_CHECKING([whether to enable multi-threading support])
-AC_ARG_ENABLE([multithreading],
-    AS_HELP_STRING([--enable-multithreading],
-                   [enable multi-threading support @<:@default=no@:>@]),
-    [enable_multithreading="$enableval"],
-    [enable_multithreading="no"])
-AC_MSG_RESULT([$enable_multithreading])
-
 AC_ARG_ENABLE([werror],
     [AS_HELP_STRING([--enable-werror],
                     [enable -Werror @<:@default=no@:>@])],
@@ -262,7 +253,6 @@ AC_CHECK_FUNCS(m4_flatten([
 	strerror
 	strrchr
 	strtoull
-  sysconf
 	tmpfile64
 	utimensat]))
 
@@ -300,13 +290,6 @@ AS_IF([test "x$enable_debug" != "xno"], [], [
   dnl Turn off all assert checking.
   CPPFLAGS="$CPPFLAGS -DNDEBUG"
 ])
-
-# Configure multi-threading support
-AS_IF([test "x$enable_multithreading" != "xno"], [
-    AC_CHECK_HEADERS([pthread.h])
-    AC_CHECK_LIB([pthread], [pthread_mutex_lock], [], AC_MSG_ERROR([libpthread is required for multi-threaded build]))
-    AC_DEFINE(EROFS_MT_ENABLED, 1, [Enable multi-threading support])
-], [])
 
 # Configure -Werror
 AS_IF([test "x$enable_werror" != "xyes"], [], [
@@ -464,13 +447,11 @@ AS_IF([test "x$enable_fuzzing" != "xyes"], [], [
 AM_CONDITIONAL([ENABLE_FUZZING], [test "x${enable_fuzzing}" = "xyes"])
 
 # Set up needed symbols, conditionals and compiler/linker flags
-AM_CONDITIONAL([ENABLE_EROFS_MT], [test "x${enable_multithreading}" != "xno"])
 AM_CONDITIONAL([ENABLE_LZ4], [test "x${have_lz4}" = "xyes"])
 AM_CONDITIONAL([ENABLE_LZ4HC], [test "x${have_lz4hc}" = "xyes"])
 AM_CONDITIONAL([ENABLE_FUSE], [test "x${have_fuse}" = "xyes"])
 AM_CONDITIONAL([ENABLE_LIBLZMA], [test "x${have_liblzma}" = "xyes"])
 AM_CONDITIONAL([ENABLE_LIBDEFLATE], [test "x${have_libdeflate}" = "xyes"])
-
 
 if test "x$have_uuid" = "xyes"; then
   AC_DEFINE([HAVE_LIBUUID], 1, [Define to 1 if libuuid is found])

@@ -24,15 +24,17 @@ static inline unsigned int inlinexattr_header_size(struct erofs_inode *vi)
 		sizeof(u32) * vi->xattr_shared_count;
 }
 
-static inline erofs_blk_t xattrblock_addr(unsigned int xattr_id)
+static inline erofs_blk_t xattrblock_addr(struct erofs_inode *vi,
+					  unsigned int xattr_id)
 {
-	return sbi.xattr_blkaddr +
-		xattr_id * sizeof(__u32) / EROFS_BLKSIZ;
+	return vi->sbi->xattr_blkaddr +
+		erofs_blknr(vi->sbi, xattr_id * sizeof(__u32));
 }
 
-static inline unsigned int xattrblock_offset(unsigned int xattr_id)
+static inline unsigned int xattrblock_offset(struct erofs_inode *vi,
+					     unsigned int xattr_id)
 {
-	return (xattr_id * sizeof(__u32)) % EROFS_BLKSIZ;
+	return erofs_blkoff(vi->sbi, xattr_id * sizeof(__u32));
 }
 
 #define EROFS_INODE_XATTR_ICOUNT(_size)	({\
@@ -41,6 +43,12 @@ static inline unsigned int xattrblock_offset(unsigned int xattr_id)
 	(_size - sizeof(struct erofs_xattr_ibody_header)) / \
 	sizeof(struct erofs_xattr_entry) + 1; })
 
+#ifndef XATTR_SYSTEM_PREFIX
+#define XATTR_SYSTEM_PREFIX	"system."
+#endif
+#ifndef XATTR_SYSTEM_PREFIX_LEN
+#define XATTR_SYSTEM_PREFIX_LEN (sizeof(XATTR_SYSTEM_PREFIX) - 1)
+#endif
 #ifndef XATTR_USER_PREFIX
 #define XATTR_USER_PREFIX	"user."
 #endif
@@ -66,9 +74,17 @@ static inline unsigned int xattrblock_offset(unsigned int xattr_id)
 #define XATTR_NAME_POSIX_ACL_DEFAULT "system.posix_acl_default"
 #endif
 
+int erofs_scan_file_xattrs(struct erofs_inode *inode);
 int erofs_prepare_xattr_ibody(struct erofs_inode *inode);
 char *erofs_export_xattr_ibody(struct list_head *ixattrs, unsigned int size);
-int erofs_build_shared_xattrs_from_path(const char *path);
+int erofs_build_shared_xattrs_from_path(struct erofs_sb_info *sbi, const char *path);
+
+int erofs_xattr_insert_name_prefix(const char *prefix);
+void erofs_xattr_cleanup_name_prefixes(void);
+int erofs_xattr_write_name_prefixes(struct erofs_sb_info *sbi, FILE *f);
+
+int erofs_setxattr(struct erofs_inode *inode, char *key,
+		   const void *value, size_t size);
 
 #ifdef __cplusplus
 }

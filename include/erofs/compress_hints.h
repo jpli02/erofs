@@ -20,11 +20,12 @@ struct erofs_compress_hints {
 
 	regex_t reg;
 	unsigned int physical_clusterblks;
+	unsigned char algorithmtype;
 };
 
 bool z_erofs_apply_compress_hints(struct erofs_inode *inode);
 void erofs_cleanup_compress_hints(void);
-int erofs_load_compress_hints(void);
+int erofs_load_compress_hints(struct erofs_sb_info *sbi);
 
 #ifdef __cplusplus
 }

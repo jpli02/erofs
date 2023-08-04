@@ -20,6 +20,10 @@ static const struct erofs_compressor *compressors[] = {
 #if HAVE_LIBLZMA
 		&erofs_compressor_lzma,
 #endif
+		&erofs_compressor_deflate,
+#if HAVE_LIBDEFLATE
+		&erofs_compressor_libdeflate,
+#endif
 };
 
 int erofs_compress_destsize(const struct erofs_compress *c,
@@ -38,10 +42,10 @@ int erofs_compress_destsize(const struct erofs_compress *c,
 	if (ret < 0)
 		return ret;
 
-	/* XXX: ret >= EROFS_BLKSIZ is a temporary hack for ztailpacking */
-	if (inblocks || ret >= EROFS_BLKSIZ ||
+	/* XXX: ret >= destsize_alignsize is a temporary hack for ztailpacking */
+	if (inblocks || ret >= c->destsize_alignsize ||
 	    uncompressed_capacity != *srcsize)
-		compressed_size = roundup(ret, EROFS_BLKSIZ);
+		compressed_size = roundup(ret, c->destsize_alignsize);
 	else
 		compressed_size = ret;
 	DBG_BUGON(c->compress_threshold < 100);
@@ -68,16 +72,19 @@ int erofs_compressor_setlevel(struct erofs_compress *c, int compression_level)
 	return 0;
 }
 
-int erofs_compressor_init(struct erofs_compress *c, char *alg_name)
+int erofs_compressor_init(struct erofs_sb_info *sbi,
+			  struct erofs_compress *c, char *alg_name)
 {
 	int ret, i;
+
+	c->sbi = sbi;
 
 	/* should be written in "minimum compression ratio * 100" */
 	c->compress_threshold = 100;
 
 	/* optimize for 4k size page */
-	c->destsize_alignsize = EROFS_BLKSIZ;
-	c->destsize_redzone_begin = EROFS_BLKSIZ - 16;
+	c->destsize_alignsize = erofs_blksiz(sbi);
+	c->destsize_redzone_begin = erofs_blksiz(sbi) - 16;
 	c->destsize_redzone_end = EROFS_CONFIG_COMPR_DEF_BOUNDARY;
 
 	if (!alg_name) {
